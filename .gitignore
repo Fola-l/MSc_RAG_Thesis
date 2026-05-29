@@ -1,0 +1,14 @@
+# Environment
+.env
+rag_thesis_env/
+
+# Large pre-built index/data files (too large for GitHub)
+faiss_100k.bin
+bm25_100k.pkl
+docs_100k.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.DS_Store
