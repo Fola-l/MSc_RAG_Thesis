@@ -12,6 +12,7 @@ import json
 import csv
 import time
 import math
+import random
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,17 +40,24 @@ for config_name, path in CONFIG_FILES.items():
 if not all_results:
     raise SystemExit("No result files found. Run all config scripts first.")
 
+# ── FIXED 100-QUERY RAGAS SAMPLE (same across all configs) ────
+random.seed(42)
+reference_ids  = [r['query_id'] for r in list(all_results.values())[0]]
+sampled_ids    = set(random.sample(reference_ids, 100))
+
+ragas_sample_path = os.path.join(BASE_DIR, "ragas_sample_ids.json")
+with open(ragas_sample_path, "w") as f:
+    json.dump(sorted(sampled_ids), f)
+print(f"\nRAGAS sample: 100 query IDs fixed (seed=42) — saved to ragas_sample_ids.json")
+
 # ── LOAD BEIR NQ QRELS ────────────────────────────────────────
 print("\nLoading BEIR NQ qrels...")
-from datasets import load_dataset
+import ir_datasets
 
-qrels_raw = load_dataset('BeIR/nq', 'qrels', split='test')
 qrels = {}
-for row in qrels_raw:
-    qid = str(row['query-id'])
-    did = str(row['corpus-id'])
-    if int(row['score']) > 0:
-        qrels.setdefault(qid, set()).add(did)
+for qrel in ir_datasets.load('beir/nq').qrels_iter():
+    if qrel.relevance > 0:
+        qrels.setdefault(str(qrel.query_id), set()).add(str(qrel.doc_id))
 
 print(f"Loaded qrels for {len(qrels)} queries")
 
@@ -100,18 +108,36 @@ def compute_retrieval_metrics(results):
     }
 
 # ── RAGAS EVALUATION ──────────────────────────────────────────
-def compute_ragas_metrics(results, config_name):
+def _extract_score(val):
+    """Handle RAGAS returning either a float or a list of per-sample scores."""
+    if isinstance(val, (list, tuple)):
+        valid = [float(v) for v in val
+                 if v is not None and isinstance(v, (int, float)) and not math.isnan(float(v))]
+        return sum(valid) / len(valid) if valid else float('nan')
+    if val is None:
+        return float('nan')
+    return float(val)
+
+def compute_ragas_metrics(results, config_name, sampled_ids):
+    results = [r for r in results if r['query_id'] in sampled_ids]
+    print(f"  RAGAS subset: {len(results)} queries")
     try:
+        import sys, types
+        # ragas/llms/base.py imports ChatVertexAI at module level; stub it out
+        # since langchain-community >= 0.3 removed chat_models.vertexai
+        if 'langchain_community.chat_models.vertexai' not in sys.modules:
+            _stub = types.ModuleType('langchain_community.chat_models.vertexai')
+            _stub.ChatVertexAI = type('ChatVertexAI', (), {})
+            sys.modules['langchain_community.chat_models.vertexai'] = _stub
+
         from datasets import Dataset
         from ragas import evaluate
-        from ragas.metrics import faithfulness, answer_relevancy, context_precision
+        from ragas.metrics import faithfulness
         from ragas.llms import LangchainLLMWrapper
-        from ragas.embeddings import LangchainEmbeddingsWrapper
         from langchain_groq import ChatGroq
-        from langchain_community.embeddings import HuggingFaceEmbeddings
     except ImportError as e:
         print(f"  RAGAS import error: {e}")
-        return {"faithfulness": None, "answer_relevancy": None, "context_precision": None}
+        return {"faithfulness": None}
 
     print(f"  Configuring RAGAS with Groq LLM...")
     groq_llm = LangchainLLMWrapper(ChatGroq(
@@ -119,14 +145,7 @@ def compute_ragas_metrics(results, config_name):
         api_key=os.environ["GROQ_API_KEY"],
         temperature=0.0,
     ))
-    hf_embeddings = LangchainEmbeddingsWrapper(HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    ))
-
-    faithfulness.llm          = groq_llm
-    answer_relevancy.llm      = groq_llm
-    answer_relevancy.embeddings = hf_embeddings
-    context_precision.llm     = groq_llm
+    faithfulness.llm = groq_llm
 
     data = {
         "question": [r["query"]    for r in results],
@@ -137,34 +156,32 @@ def compute_ragas_metrics(results, config_name):
 
     BATCH_SIZE = 50
     n_batches  = math.ceil(len(dataset) / BATCH_SIZE)
-    print(f"  Running RAGAS on {len(dataset)} samples in {n_batches} batches of {BATCH_SIZE} (Groq rate-limit safe)...")
+    print(f"  Running RAGAS faithfulness on {len(dataset)} samples in {n_batches} batches...")
 
-    all_scores = {"faithfulness": [], "answer_relevancy": [], "context_precision": []}
+    batch_faith = []
     try:
         for batch_idx in range(n_batches):
             start = batch_idx * BATCH_SIZE
             end   = min(start + BATCH_SIZE, len(dataset))
             batch = dataset.select(range(start, end))
 
-            batch_scores = evaluate(
-                batch,
-                metrics=[faithfulness, answer_relevancy, context_precision],
-            )
-            for key in all_scores:
-                all_scores[key].append(float(batch_scores[key]))
+            batch_scores = evaluate(batch, metrics=[faithfulness])
+            score = _extract_score(batch_scores["faithfulness"])
+            batch_faith.append(score)
 
-            print(f"  Batch {batch_idx + 1}/{n_batches} done")
+            valid_so_far = [s for s in batch_faith if not math.isnan(s)]
+            mean_so_far  = sum(valid_so_far) / len(valid_so_far) if valid_so_far else float('nan')
+            print(f"  Batch {batch_idx + 1}/{n_batches} done — faithfulness={score:.4f}  running mean={mean_so_far:.4f}")
+
             if batch_idx < n_batches - 1:
-                time.sleep(60)  # ~50 calls/batch; pause to respect Groq ~30 req/min
+                time.sleep(60)  # pause between batches for Groq rate limit
 
-        return {
-            "faithfulness"     : round(sum(all_scores["faithfulness"])      / n_batches, 4),
-            "answer_relevancy" : round(sum(all_scores["answer_relevancy"])  / n_batches, 4),
-            "context_precision": round(sum(all_scores["context_precision"]) / n_batches, 4),
-        }
+        valid = [s for s in batch_faith if not math.isnan(s)]
+        mean_faith = round(sum(valid) / len(valid), 4) if valid else None
+        return {"faithfulness": mean_faith}
     except Exception as e:
         print(f"  RAGAS evaluation failed: {e}")
-        return {"faithfulness": None, "answer_relevancy": None, "context_precision": None}
+        return {"faithfulness": None}
 
 # ── RUN EVERYTHING ────────────────────────────────────────────
 summary = []
@@ -181,28 +198,25 @@ for config_name, results in all_results.items():
     print(f"  NDCG@5   : {ret_metrics['ndcg@5']}")
 
     print("  Computing RAGAS metrics...")
-    gen_metrics = compute_ragas_metrics(results, config_name)
-    print(f"  Faithfulness      : {gen_metrics['faithfulness']}")
-    print(f"  Answer Relevancy  : {gen_metrics['answer_relevancy']}")
-    print(f"  Context Precision : {gen_metrics['context_precision']}")
+    gen_metrics = compute_ragas_metrics(results, config_name, sampled_ids)
+    print(f"  Faithfulness : {gen_metrics['faithfulness']}")
 
     summary.append({
-        "config"            : config_name,
-        "n_queries"         : ret_metrics["n_eval"],
-        "recall@5"          : ret_metrics["recall@5"],
-        "mrr@5"             : ret_metrics["mrr@5"],
-        "ndcg@5"            : ret_metrics["ndcg@5"],
-        "faithfulness"      : gen_metrics["faithfulness"],
-        "answer_relevancy"  : gen_metrics["answer_relevancy"],
-        "context_precision" : gen_metrics["context_precision"],
+        "config"      : config_name,
+        "n_queries"   : ret_metrics["n_eval"],
+        "ragas_n"     : 100,
+        "recall@5"    : ret_metrics["recall@5"],
+        "mrr@5"       : ret_metrics["mrr@5"],
+        "ndcg@5"      : ret_metrics["ndcg@5"],
+        "faithfulness": gen_metrics["faithfulness"],
     })
 
 # ── SAVE CSV ──────────────────────────────────────────────────
 csv_path = os.path.join(RESULTS_DIR, "evaluation_summary.csv")
 fieldnames = [
-    "config", "n_queries",
+    "config", "n_queries", "ragas_n",
     "recall@5", "mrr@5", "ndcg@5",
-    "faithfulness", "answer_relevancy", "context_precision",
+    "faithfulness",
 ]
 with open(csv_path, "w", newline="") as f:
     writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -215,18 +229,16 @@ print(f"{'='*50}\n")
 
 # ── PRINT TABLE ───────────────────────────────────────────────
 col_w = 22
-header = f"{'Config':<{col_w}} {'Recall@5':>9} {'MRR@5':>7} {'NDCG@5':>8} {'Faith.':>7} {'AnsRel.':>8} {'CtxPrec.':>9}"
+header = f"{'Config':<{col_w}} {'Recall@5':>9} {'MRR@5':>7} {'NDCG@5':>8} {'Faith.':>8}"
 print(header)
 print("-" * len(header))
 for row in summary:
     def fmt(v):
-        return f"{v:.4f}" if v is not None else "  N/A "
+        return f"{v:.4f}" if v is not None else "   N/A"
     print(
         f"{row['config']:<{col_w}} "
         f"{fmt(row['recall@5']):>9} "
         f"{fmt(row['mrr@5']):>7} "
         f"{fmt(row['ndcg@5']):>8} "
-        f"{fmt(row['faithfulness']):>7} "
-        f"{fmt(row['answer_relevancy']):>8} "
-        f"{fmt(row['context_precision']):>9}"
+        f"{fmt(row['faithfulness']):>8}"
     )
