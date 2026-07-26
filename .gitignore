@@ -4,6 +4,7 @@ rag_thesis_env/
 
 # Large pre-built index/data files (too large for GitHub)
 faiss_100k.bin
+faiss_100k_v2.bin
 bm25_100k.pkl
 docs_100k.json
 

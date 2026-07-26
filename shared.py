@@ -22,7 +22,7 @@ np.random.seed(42)
 # ── PATHS ─────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
 DOCS_PATH  = os.path.join(BASE_DIR, "docs_100k.json")
-FAISS_PATH = os.path.join(BASE_DIR, "faiss_100k.bin")
+FAISS_PATH = os.path.join(BASE_DIR, "faiss_100k_v2.bin")
 BM25_PATH  = os.path.join(BASE_DIR, "bm25_100k.pkl")
 
 # ── LOAD DOCS (always needed) ─────────────────────────────────
@@ -38,10 +38,10 @@ print(f"Loaded {len(doc_texts)} documents")
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # ── CONDITIONAL LOADERS ───────────────────────────────────────
-faiss_index = None
-encoder     = None
-bm25        = None
-reranker    = None
+faiss_index    = None
+question_encoder = None
+bm25           = None
+reranker       = None
 
 def load_faiss():
     global faiss_index
@@ -50,15 +50,15 @@ def load_faiss():
         faiss_index = faiss.read_index(FAISS_PATH)
         print(f"FAISS loaded: {faiss_index.ntotal} vectors")
 
-def load_encoder():
-    global encoder
-    if encoder is None:
-        print("Loading encoder...")
-        encoder = SentenceTransformer(
-            'facebook-dpr-ctx_encoder-single-nq-base',
+def load_question_encoder():
+    global question_encoder
+    if question_encoder is None:
+        print("Loading question encoder...")
+        question_encoder = SentenceTransformer(
+            'facebook-dpr-question_encoder-single-nq-base',
             device='cpu'
         )
-        print("Encoder loaded")
+        print("Question encoder loaded")
 
 def load_bm25():
     global bm25
@@ -85,10 +85,10 @@ def load_reranker():
 
 # ── ENCODE QUERIES ────────────────────────────────────────────
 def encode_queries(query_texts):
-    load_encoder()
+    load_question_encoder()
     load_faiss()
     print("Encoding queries...")
-    embeddings = encoder.encode(
+    embeddings = question_encoder.encode(
         query_texts,
         batch_size=64,
         show_progress_bar=True,
@@ -103,7 +103,6 @@ def dense_retrieve(query_embedding, top_k=10):
     q_emb = np.ascontiguousarray(
         query_embedding.reshape(1, -1), dtype=np.float32
     )
-    faiss.normalize_L2(q_emb)
     scores, indices = faiss_index.search(q_emb, top_k)
     return [(doc_ids[i], doc_texts[i], float(scores[0][j]))
             for j, i in enumerate(indices[0])]

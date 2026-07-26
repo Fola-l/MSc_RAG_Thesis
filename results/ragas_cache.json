@@ -1,0 +1,6 @@
+{
+  "config1_dense": 0.609,
+  "config2_dense_rerank": 0.6831,
+  "config3_hybrid": 0.6032,
+  "config4_hybrid_rerank": 0.6344
+}

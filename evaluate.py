@@ -154,9 +154,15 @@ def compute_ragas_metrics(results, config_name, sampled_ids):
     }
     dataset = Dataset.from_dict(data)
 
-    BATCH_SIZE = 50
+    try:
+        from ragas import RunConfig
+        run_config = RunConfig(max_workers=1, timeout=120, max_retries=3)
+    except ImportError:
+        run_config = None
+
+    BATCH_SIZE = 25
     n_batches  = math.ceil(len(dataset) / BATCH_SIZE)
-    print(f"  Running RAGAS faithfulness on {len(dataset)} samples in {n_batches} batches...")
+    print(f"  Running RAGAS faithfulness on {len(dataset)} samples in {n_batches} batches (sequential)...")
 
     batch_faith = []
     try:
@@ -165,7 +171,10 @@ def compute_ragas_metrics(results, config_name, sampled_ids):
             end   = min(start + BATCH_SIZE, len(dataset))
             batch = dataset.select(range(start, end))
 
-            batch_scores = evaluate(batch, metrics=[faithfulness])
+            kwargs = dict(metrics=[faithfulness], raise_exceptions=False)
+            if run_config is not None:
+                kwargs["run_config"] = run_config
+            batch_scores = evaluate(batch, **kwargs)
             score = _extract_score(batch_scores["faithfulness"])
             batch_faith.append(score)
 
@@ -174,7 +183,7 @@ def compute_ragas_metrics(results, config_name, sampled_ids):
             print(f"  Batch {batch_idx + 1}/{n_batches} done — faithfulness={score:.4f}  running mean={mean_so_far:.4f}")
 
             if batch_idx < n_batches - 1:
-                time.sleep(60)  # pause between batches for Groq rate limit
+                time.sleep(30)
 
         valid = [s for s in batch_faith if not math.isnan(s)]
         mean_faith = round(sum(valid) / len(valid), 4) if valid else None
@@ -183,7 +192,22 @@ def compute_ragas_metrics(results, config_name, sampled_ids):
         print(f"  RAGAS evaluation failed: {e}")
         return {"faithfulness": None}
 
+# ── RAGAS CACHE (skip already-scored configs on re-run) ───────
+ragas_cache_path = os.path.join(RESULTS_DIR, "ragas_cache.json")
+if os.path.exists(ragas_cache_path):
+    with open(ragas_cache_path) as f:
+        ragas_cache = json.load(f)
+    print(f"\nLoaded RAGAS cache: {list(ragas_cache.keys())}")
+else:
+    ragas_cache = {}
+
 # ── RUN EVERYTHING ────────────────────────────────────────────
+csv_path = os.path.join(RESULTS_DIR, "evaluation_summary.csv")
+fieldnames = [
+    "config", "n_queries", "ragas_n",
+    "recall@5", "mrr@5", "ndcg@5",
+    "faithfulness",
+]
 summary = []
 
 for config_name, results in all_results.items():
@@ -197,8 +221,16 @@ for config_name, results in all_results.items():
     print(f"  MRR@5    : {ret_metrics['mrr@5']}")
     print(f"  NDCG@5   : {ret_metrics['ndcg@5']}")
 
-    print("  Computing RAGAS metrics...")
-    gen_metrics = compute_ragas_metrics(results, config_name, sampled_ids)
+    if config_name in ragas_cache and ragas_cache[config_name] is not None:
+        print(f"  RAGAS: using cached score ({ragas_cache[config_name]})")
+        gen_metrics = {"faithfulness": ragas_cache[config_name]}
+    else:
+        print("  Computing RAGAS metrics...")
+        gen_metrics = compute_ragas_metrics(results, config_name, sampled_ids)
+        ragas_cache[config_name] = gen_metrics["faithfulness"]
+        with open(ragas_cache_path, "w") as f:
+            json.dump(ragas_cache, f, indent=2)
+        print(f"  RAGAS cache updated.")
     print(f"  Faithfulness : {gen_metrics['faithfulness']}")
 
     summary.append({
@@ -211,17 +243,11 @@ for config_name, results in all_results.items():
         "faithfulness": gen_metrics["faithfulness"],
     })
 
-# ── SAVE CSV ──────────────────────────────────────────────────
-csv_path = os.path.join(RESULTS_DIR, "evaluation_summary.csv")
-fieldnames = [
-    "config", "n_queries", "ragas_n",
-    "recall@5", "mrr@5", "ndcg@5",
-    "faithfulness",
-]
-with open(csv_path, "w", newline="") as f:
-    writer = csv.DictWriter(f, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(summary)
+    # save CSV after every config so a later failure doesn't lose everything
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(summary)
 
 print(f"\n{'='*50}")
 print(f"✓ Evaluation complete. Summary saved to {csv_path}")

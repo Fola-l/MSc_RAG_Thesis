@@ -16,7 +16,7 @@ import random
 from datasets import load_dataset
 from shared import (
     load_faiss,
-    load_encoder,
+    load_question_encoder,
     load_bm25,
     dense_retrieve,
     bm25_retrieve,
@@ -31,7 +31,7 @@ BASE_DIR     = os.path.dirname(os.path.abspath(__file__))
 QUERIES_PATH = os.path.join(BASE_DIR, "sampled_queries.json")
 
 load_faiss()
-load_encoder()
+load_question_encoder()
 load_bm25()
 
 print("Loading queries...")
@@ -73,8 +73,8 @@ for i, query_item in enumerate(queries):
 
     query_emb = query_embeddings[i:i+1]
 
-    dense_results     = dense_retrieve(query_emb, top_k=10)
-    bm25_results      = bm25_retrieve(query_text, top_k=10)
+    dense_results     = dense_retrieve(query_emb, top_k=50)
+    bm25_results      = bm25_retrieve(query_text, top_k=50)
     fused             = rrf_fusion(dense_results, bm25_results)
     top5              = fused[:5]
     contexts          = [text for _, text, _ in top5]
