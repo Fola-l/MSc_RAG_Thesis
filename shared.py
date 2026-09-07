@@ -11,6 +11,7 @@ import random
 import numpy as np
 from dotenv import load_dotenv
 from groq import Groq
+import ollama
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from rank_bm25 import BM25Okapi
 import faiss
@@ -156,3 +157,21 @@ Answer:"""
         temperature=0.0
     )
     return response.choices[0].message.content
+
+def generate_answer_local(query, contexts, model="llama3.2:3b"):
+    context_str = "\n\n".join([f"Context {i+1}: {c}"
+                               for i, c in enumerate(contexts)])
+    prompt = f"""Answer the question based only on the provided context.
+Be concise and factual. If the context does not contain the answer, say "I don't know".
+
+{context_str}
+
+Question: {query}
+Answer:"""
+
+    response = ollama.chat(
+        model=model,
+        messages=[{'role': 'user', 'content': prompt}],
+        options={'temperature': 0.0, 'num_predict': 150}
+    )
+    return response['message']['content']

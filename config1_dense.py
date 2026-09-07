@@ -19,7 +19,7 @@ from shared import (
     load_question_encoder,
     dense_retrieve,
     encode_queries,
-    generate_answer,
+    generate_answer_local,
 )
 
 random.seed(42)
@@ -48,7 +48,7 @@ query_texts      = [q['text'] for q in queries]
 query_embeddings = encode_queries(query_texts)
 
 os.makedirs(os.path.join(BASE_DIR, "results"), exist_ok=True)
-output_path = os.path.join(BASE_DIR, "results", "config1_dense.json")
+output_path = os.path.join(BASE_DIR, "results", "config1_dense_local.json")
 
 if os.path.exists(output_path):
     with open(output_path) as f:
@@ -73,7 +73,7 @@ for i, query_item in enumerate(queries):
     contexts          = [text for _, text, _ in retrieved]
     doc_ids_retrieved = [doc_id for doc_id, _, _ in retrieved]
 
-    answer = generate_answer(query_text, contexts)
+    answer = generate_answer_local(query_text, contexts)
 
     results.append({
         "query_id"     : query_id,
