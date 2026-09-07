@@ -1,0 +1,5 @@
+config,n_queries,recall@5,mrr@5,ndcg@5,refusal_rate
+config1_dense,500,0.5518,0.4437,0.453,0.422
+config2_dense_rerank,500,0.6163,0.5187,0.5281,0.386
+config3_hybrid,500,0.51,0.4063,0.4151,0.476
+config4_hybrid_rerank,500,0.6137,0.5154,0.5259,0.392

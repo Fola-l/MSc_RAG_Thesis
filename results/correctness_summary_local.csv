@@ -1,0 +1,5 @@
+config,n_scored,refusal_rate_500,refusal_rate_395,EM_all,F1_all,EM_nonrefusal,F1_nonrefusal
+config1_dense,395,0.422,0.4076,0.1392,0.2736,0.235,0.4546
+config2_dense_rerank,395,0.386,0.3797,0.1241,0.2766,0.2,0.4335
+config3_hybrid,395,0.476,0.4532,0.1063,0.247,0.1944,0.4396
+config4_hybrid_rerank,395,0.392,0.3747,0.1266,0.2785,0.2024,0.4343

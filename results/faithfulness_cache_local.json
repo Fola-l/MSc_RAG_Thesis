@@ -1,0 +1,22 @@
+{
+  "config1_dense": {
+    "n_nonrefusal": 51,
+    "n_valid": 51,
+    "mean": 0.8854
+  },
+  "config2_dense_rerank": {
+    "n_nonrefusal": 63,
+    "n_valid": 62,
+    "mean": 0.8368
+  },
+  "config3_hybrid": {
+    "n_nonrefusal": 51,
+    "n_valid": 51,
+    "mean": 0.828
+  },
+  "config4_hybrid_rerank": {
+    "n_nonrefusal": 59,
+    "n_valid": 58,
+    "mean": 0.8291
+  }
+}
