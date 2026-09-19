@@ -1,0 +1,11 @@
+query_id,phi3_score,phi3_valid,mistral_score,mistral_valid,time_phi3,time_mistral,phi3_error,mistral_error
+test2,0.6667,True,,False,98.0,308.5,,NaN returned (parsing/scoring failure inside ragas)
+test8,,False,,False,0.1,306.5,NaN returned (parsing/scoring failure inside ragas),NaN returned (parsing/scoring failure inside ragas)
+test13,1.0,True,,False,106.7,305.3,,NaN returned (parsing/scoring failure inside ragas)
+test14,,False,,False,0.3,305.2,NaN returned (parsing/scoring failure inside ragas),NaN returned (parsing/scoring failure inside ragas)
+test26,1.0,True,,False,197.7,306.3,,NaN returned (parsing/scoring failure inside ragas)
+test32,,False,,False,12.0,303.2,NaN returned (parsing/scoring failure inside ragas),NaN returned (parsing/scoring failure inside ragas)
+test29,0.0,True,,False,61.1,303.7,,NaN returned (parsing/scoring failure inside ragas)
+test38,,False,,False,1.5,305.0,NaN returned (parsing/scoring failure inside ragas),NaN returned (parsing/scoring failure inside ragas)
+test102,0.0,True,,False,65.9,304.5,,NaN returned (parsing/scoring failure inside ragas)
+test108,,False,,False,3.7,305.9,NaN returned (parsing/scoring failure inside ragas),NaN returned (parsing/scoring failure inside ragas)
